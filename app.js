@@ -123,9 +123,15 @@ class VHSTraderGame {
         await this.initVKBridge();
 
         this.updateLoadingStatus('Загружаем прогресс игрока');
-        const progressLoaded = await this.loadProgress();
-        if (progressLoaded) {
-            this.customerRequestEl.textContent = `День ${this.day}. Нажмите "Начать день" чтобы открыть магазин.`;
+        const hasSave = await this.hasSavedProgress();
+        if (hasSave) {
+            const progressLoaded = await this.loadProgress();
+            if (progressLoaded) {
+                this.customerRequestEl.textContent = `День ${this.day}. Нажмите "Начать день" чтобы открыть магазин.`;
+                this.btnStartDay.textContent = '🌅 Продолжить';
+            } else {
+                this.prepareNewRun();
+            }
         } else {
             this.prepareNewRun();
         }
@@ -673,9 +679,25 @@ class VHSTraderGame {
     // SAVE/LOAD PROGRESS
     // ==========================================
 
-    saveProgress() {
+    async saveProgress() {
         const saveData = this.buildSaveData();
-        this.saveToLocal(saveData);
+        if (typeof vkBridge !== 'undefined' && vkBridge.send) {
+            try {
+                await vkBridge.send('VKWebAppStorageSet', {
+                    key: this.STORAGE_KEY,
+                    value: JSON.stringify(saveData)
+                });
+                return;
+            } catch (error) {
+                console.error('Failed to save progress to VK Storage, falling back to local storage', error);
+            }
+        }
+
+        try {
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(saveData));
+        } catch (e) {
+            console.warn('Could not save progress to local storage:', e);
+        }
     }
 
     buildSaveData() {
@@ -720,46 +742,65 @@ class VHSTraderGame {
     }
 
     async loadProgress() {
-        const localData = this.loadFromLocal();
-        if (localData) {
-            this.applySaveData(localData);
-            return true;
+        if (typeof vkBridge !== 'undefined' && vkBridge.send) {
+            try {
+                const data = await vkBridge.send('VKWebAppStorageGet', { keys: [this.STORAGE_KEY] });
+                if (data.keys && data.keys[0].value) {
+                    const saveData = JSON.parse(data.keys[0].value);
+                    this.applySaveData(saveData);
+                    return true;
+                }
+            } catch (error) {
+                console.error('Failed to load progress from VK Storage, falling back to local storage', error);
+            }
+        }
+
+        try {
+            const saved = localStorage.getItem(this.STORAGE_KEY);
+            if (saved) {
+                this.applySaveData(JSON.parse(saved));
+                return true;
+            }
+        } catch (e) {
+            console.warn('Could not load progress from local storage:', e);
         }
 
         return false;
     }
 
-    loadFromLocal() {
-        try {
-            const saved = localStorage.getItem(this.STORAGE_KEY);
-            if (!saved) return null;
-            return JSON.parse(saved);
-        } catch (e) {
-            console.warn('Could not load progress:', e);
-            return null;
+    async clearProgress() {
+        if (typeof vkBridge !== 'undefined' && vkBridge.send) {
+            try {
+                await vkBridge.send('VKWebAppStorageSet', { key: this.STORAGE_KEY, value: '' });
+                return;
+            } catch (error) {
+                console.error('Failed to clear progress in VK Storage, falling back to local storage', error);
+            }
         }
-    }
 
-    saveToLocal(saveData) {
-        try {
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(saveData));
-        } catch (e) {
-            console.warn('Could not save progress:', e);
-        }
-    }
-
-    clearProgress() {
         try {
             localStorage.removeItem(this.STORAGE_KEY);
         } catch (e) {
-            console.warn('Could not clear progress:', e);
+            console.warn('Could not clear progress in local storage:', e);
         }
     }
 
-    hasSavedProgress() {
+    async hasSavedProgress() {
+        if (typeof vkBridge !== 'undefined' && vkBridge.send) {
+            try {
+                const data = await vkBridge.send('VKWebAppStorageGet', { keys: [this.STORAGE_KEY] });
+                if (data.keys && data.keys[0].value && data.keys[0].value.length > 0) {
+                    return true;
+                }
+            } catch (error) {
+                console.error('Failed to check saved progress in VK Storage, falling back to local storage', error);
+            }
+        }
+
         try {
             return localStorage.getItem(this.STORAGE_KEY) !== null;
         } catch (e) {
+            console.warn('Could not check saved progress in local storage:', e);
             return false;
         }
     }
