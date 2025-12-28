@@ -29,22 +29,13 @@ class VHSTraderGame {
         // Storage key
         this.STORAGE_KEY = 'vhs_trader_save';
 
-        // Yandex SDK
-        this.ysdk = null;
-        this.player = null;
-        this.canReadCloudSaves = false;
-        this.canWriteCloudSaves = false;
-
         // Loading state
         this.loadingOverlay = null;
         this.loadingStatusEl = null;
         this.loadingStartTime = 0;
         this.MIN_LOADING_TIME = 2000;
-        this.loadingReadyReported = false;
 
         this.isShowingAd = false;
-
-        this.initialGameplaySessionStarted = false;
 
         // DOM elements
         this.initializeDOM();
@@ -128,8 +119,8 @@ class VHSTraderGame {
     }
 
     async initializeGame() {
-        this.showLoadingScreen('Подключение к сервисам Яндекса');
-        await this.initYandexSDK();
+        this.showLoadingScreen('Подключение к сервисам VK');
+        await this.initVKBridge();
 
         this.updateLoadingStatus('Загружаем прогресс игрока');
         const progressLoaded = await this.loadProgress();
@@ -176,85 +167,19 @@ class VHSTraderGame {
         if (this.loadingOverlay) {
             this.loadingOverlay.classList.remove('visible');
         }
-
-        this.signalLoadingReady();
     }
 
-    signalLoadingReady() {
-        if (this.loadingReadyReported) return;
-        this.loadingReadyReported = true;
-
-        try {
-            if (this.ysdk?.features?.LoadingAPI?.ready) {
-                this.ysdk.features.LoadingAPI.ready();
-            }
-        } catch (e) {
-            console.warn('Не удалось сообщить о готовности загрузки', e);
-        }
-    }
-
-    startInitialGameplaySession() {
-        if (this.initialGameplaySessionStarted) return;
-
-        this.initialGameplaySessionStarted = true;
-        this.startGameplaySession();
-    }
-
-    startGameplaySession() {
-        try {
-            this.ysdk?.features?.GameplayAPI?.start?.();
-        } catch (e) {
-            console.warn('Не удалось запустить игровую сессию', e);
-        }
-    }
-
-    stopGameplaySession() {
-        try {
-            this.ysdk?.features?.GameplayAPI?.stop?.();
-        } catch (e) {
-            console.warn('Не удалось остановить игровую сессию', e);
-        }
-    }
-
-    async initYandexSDK() {
-        if (this.ysdk || typeof YaGames === 'undefined') {
+    async initVKBridge() {
+        if (typeof vkBridge === 'undefined') {
+            console.warn('VK Bridge is not defined');
             return;
         }
-
         try {
-            this.ysdk = await YaGames.init();
-
-            if (this.ysdk?.environment?.i18n) {
-                const langSetter = this.ysdk.environment.i18n.lang;
-                if (typeof langSetter === 'function') {
-                    langSetter('ru');
-                } else {
-                    this.ysdk.environment.i18n.lang = 'ru';
-                }
-            }
-
-            await this.setupPlayer();
+            await vkBridge.send('VKWebAppInit');
+            console.log('VK Bridge initialized');
         } catch (e) {
-            console.warn('Не удалось инициализировать Yandex SDK', e);
+            console.error('VK Bridge init failed', e);
         }
-    }
-
-    async setupPlayer() {
-        if (!this.ysdk?.getPlayer) return;
-
-        try {
-            this.player = await this.ysdk.getPlayer({ scopes: true });
-        } catch (primaryError) {
-            console.warn('Полный доступ к игроку недоступен, пробуем ограниченный режим', primaryError);
-            try {
-                this.player = await this.ysdk.getPlayer({ scopes: false });
-            } catch (secondaryError) {
-                console.warn('Не удалось получить данные игрока', secondaryError);
-            }
-        }
-
-        this.canReadCloudSaves = !!(this.player && typeof this.player.getData === 'function');
-        this.canWriteCloudSaves = !!(this.player && typeof this.player.setData === 'function');
     }
 
     prepareNewRun() {
@@ -331,7 +256,6 @@ class VHSTraderGame {
     // ==========================================
 
     startDay() {
-        this.startInitialGameplaySession();
         this.isDay = true;
         this.currentCustomerIndex = 0;
 
@@ -643,11 +567,24 @@ class VHSTraderGame {
         this.isShowingAd = true;
         this.btnCloseShop.disabled = true;
 
-        await this.showFullscreenAd();
-
-        this.btnCloseShop.disabled = false;
-        this.isShowingAd = false;
-        this.closeShop();
+        try {
+            if (typeof vkBridge !== 'undefined' && vkBridge.send) {
+                const data = await vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' });
+                if (data.result) {
+                    console.log('Ad was shown');
+                } else {
+                    console.log('Ad was not shown');
+                }
+            } else {
+                console.warn('VK Bridge is not available to show ads');
+            }
+        } catch (error) {
+            console.error('Failed to show ad', error);
+        } finally {
+            this.btnCloseShop.disabled = false;
+            this.isShowingAd = false;
+            this.closeShop();
+        }
     }
 
     closeShop() {
@@ -662,43 +599,6 @@ class VHSTraderGame {
         this.updateStats();
         // Save progress when new day starts
         this.saveProgress();
-    }
-
-    async showFullscreenAd() {
-        if (!this.ysdk?.adv?.showFullscreenAdv) {
-            return;
-        }
-
-        this.stopGameplaySession();
-
-        await new Promise(resolve => {
-            try {
-                this.ysdk.adv.showFullscreenAdv({
-                    callbacks: {
-                        onOpen: function () {
-                            // Действие после открытия рекламы.
-                        },
-                        onClose: (wasShown) => {
-                            this.startGameplaySession();
-                            resolve(wasShown);
-                        },
-                        onError: (error) => {
-                            console.warn('Ошибка показа рекламы:', error);
-                            this.startGameplaySession();
-                            resolve(error);
-                        },
-                    }
-                }).catch(error => {
-                    console.warn('Не удалось показать рекламу:', error);
-                    this.startGameplaySession();
-                    resolve(error);
-                });
-            } catch (e) {
-                console.warn('Не удалось инициировать показ рекламы:', e);
-                this.startGameplaySession();
-                resolve(e);
-            }
-        });
     }
 
     // ==========================================
@@ -731,8 +631,6 @@ class VHSTraderGame {
     restartGame() {
         // Clear saved progress
         this.clearProgress();
-
-        this.startInitialGameplaySession();
 
         // Reset all state
         this.balance = 0;
@@ -778,7 +676,6 @@ class VHSTraderGame {
     saveProgress() {
         const saveData = this.buildSaveData();
         this.saveToLocal(saveData);
-        this.saveToCloud(saveData);
     }
 
     buildSaveData() {
@@ -823,13 +720,6 @@ class VHSTraderGame {
     }
 
     async loadProgress() {
-        const cloudData = await this.loadFromCloud();
-        if (cloudData) {
-            this.applySaveData(cloudData);
-            this.saveToLocal(cloudData);
-            return true;
-        }
-
         const localData = this.loadFromLocal();
         if (localData) {
             this.applySaveData(localData);
@@ -837,31 +727,6 @@ class VHSTraderGame {
         }
 
         return false;
-    }
-
-    async loadFromCloud() {
-        if (!this.canReadCloudSaves || !this.player) return null;
-
-        try {
-            const cloudData = await this.player.getData([this.STORAGE_KEY]);
-            const saveData = cloudData?.[this.STORAGE_KEY];
-
-            if (!saveData) return null;
-
-            if (typeof saveData === 'string') {
-                try {
-                    return JSON.parse(saveData);
-                } catch (e) {
-                    console.warn('Не удалось распарсить облачное сохранение', e);
-                    return null;
-                }
-            }
-
-            return saveData;
-        } catch (e) {
-            console.warn('Не удалось загрузить сохранение из облака', e);
-            return null;
-        }
     }
 
     loadFromLocal() {
@@ -883,32 +748,11 @@ class VHSTraderGame {
         }
     }
 
-    async saveToCloud(saveData) {
-        if (!this.canWriteCloudSaves || !this.player?.setData) return;
-
-        try {
-            await this.player.setData({ [this.STORAGE_KEY]: saveData });
-        } catch (e) {
-            console.warn('Не удалось сохранить прогресс в облако', e);
-        }
-    }
-
     clearProgress() {
         try {
             localStorage.removeItem(this.STORAGE_KEY);
         } catch (e) {
             console.warn('Could not clear progress:', e);
-        }
-
-        this.clearCloudProgress();
-    }
-
-    async clearCloudProgress() {
-        if (!this.canWriteCloudSaves || !this.player?.setData) return;
-        try {
-            await this.player.setData({ [this.STORAGE_KEY]: null });
-        } catch (e) {
-            console.warn('Не удалось очистить облачное сохранение', e);
         }
     }
 
