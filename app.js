@@ -93,6 +93,11 @@ class VHSTraderGame {
         this.victoryMessage = document.getElementById('victory-message');
         this.btnRestart = document.getElementById('btn-restart');
 
+        // Confirm new game modal
+        this.confirmModal = document.getElementById('confirm-modal');
+        this.btnConfirmYes = document.getElementById('btn-confirm-yes');
+        this.btnConfirmNo = document.getElementById('btn-confirm-no');
+
         // Loading
         this.loadingOverlay = document.getElementById('loading-overlay');
         this.loadingStatusEl = document.getElementById('loading-status');
@@ -112,6 +117,9 @@ class VHSTraderGame {
         this.filterPrice.addEventListener('change', () => this.renderShopCatalog());
 
         this.btnRestart.addEventListener('click', () => this.restartGame());
+
+        this.btnConfirmYes.addEventListener('click', () => this.onConfirmNewGame());
+        this.btnConfirmNo.addEventListener('click', () => this.closeConfirmModal());
     }
 
     preventTextSelectionAndContextMenu() {
@@ -127,7 +135,7 @@ class VHSTraderGame {
         if (hasSave) {
             const progressLoaded = await this.loadProgress();
             if (progressLoaded) {
-                this.customerRequestEl.textContent = `День ${this.day}. Нажмите "Начать день" чтобы открыть магазин.`;
+                this.customerRequestEl.textContent = `День ${this.day}. Нажмите "Продолжить" чтобы открыть магазин.`;
                 this.btnStartDay.textContent = '🌅 Продолжить';
             } else {
                 this.prepareNewRun();
@@ -444,18 +452,47 @@ class VHSTraderGame {
 
     endDay() {
         this.isDay = false;
-        this.isEvening = true;
         this.currentRequest = null;
-
-        this.customerAvatarEl.textContent = '🌙';
-        this.customerRequestEl.textContent = 'Магазин закрыт. Время пополнить запасы!';
-        this.currentCustomerEl.textContent = '0';
-        this.totalCustomersEl.textContent = '0';
 
         this.btnSkipCustomer.style.display = 'none';
         this.btnEndDay.style.display = 'none';
 
-        this.openShop();
+        // Check if there are empty slots on the shelf
+        const emptySlots = this.shelf.filter(s => s === null).length;
+
+        if (emptySlots === 0) {
+            // No empty slots - skip evening shopping and go to next day
+            this.customerAvatarEl.textContent = '🌙';
+            this.customerRequestEl.textContent = 'Магазин закрыт. Стеллаж полон, закупка не требуется.';
+            this.currentCustomerEl.textContent = '0';
+            this.totalCustomersEl.textContent = '0';
+
+            // Wait a moment before transitioning to next day
+            setTimeout(() => {
+                this.skipToNextDay();
+            }, 1500);
+        } else {
+            // Has empty slots - open evening shop
+            this.isEvening = true;
+            this.customerAvatarEl.textContent = '🌙';
+            this.customerRequestEl.textContent = 'Магазин закрыт. Время пополнить запасы!';
+            this.currentCustomerEl.textContent = '0';
+            this.totalCustomersEl.textContent = '0';
+
+            this.openShop();
+        }
+    }
+
+    skipToNextDay() {
+        this.day++;
+
+        this.btnStartDay.style.display = 'inline-block';
+        this.btnStartDay.textContent = '🌅 Продолжить';
+        this.customerAvatarEl.textContent = '☀️';
+        this.customerRequestEl.textContent = `День ${this.day}. Нажмите "Продолжить" чтобы открыть магазин.`;
+
+        this.updateStats();
+        this.saveProgress();
     }
 
     // ==========================================
@@ -599,8 +636,9 @@ class VHSTraderGame {
         this.day++;
 
         this.btnStartDay.style.display = 'inline-block';
+        this.btnStartDay.textContent = '🌅 Продолжить';
         this.customerAvatarEl.textContent = '☀️';
-        this.customerRequestEl.textContent = `День ${this.day}. Нажмите "Начать день" чтобы открыть магазин.`;
+        this.customerRequestEl.textContent = `День ${this.day}. Нажмите "Продолжить" чтобы открыть магазин.`;
 
         this.updateStats();
         // Save progress when new day starts
@@ -629,9 +667,25 @@ class VHSTraderGame {
     }
 
     confirmNewGame() {
-        if (confirm('Вы уверены? Весь прогресс будет потерян!')) {
+        // Check if there's any progress to lose
+        const hasProgress = this.day > 1 || this.soldTotal > 0 || this.balance > 0;
+
+        if (hasProgress) {
+            // Show custom modal instead of browser confirm
+            this.confirmModal.classList.remove('hidden');
+        } else {
+            // No progress - just restart without confirmation
             this.restartGame();
         }
+    }
+
+    onConfirmNewGame() {
+        this.closeConfirmModal();
+        this.restartGame();
+    }
+
+    closeConfirmModal() {
+        this.confirmModal.classList.add('hidden');
     }
 
     restartGame() {
