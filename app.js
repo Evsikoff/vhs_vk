@@ -467,6 +467,10 @@ class VHSTraderGame {
             this.currentCustomerEl.textContent = '0';
             this.totalCustomersEl.textContent = '0';
 
+            // Hide all action buttons during this transition message
+            this.btnStartDay.style.display = 'none';
+            this.btnNewGame.style.display = 'none';
+
             // Wait a moment before transitioning to next day
             setTimeout(() => {
                 this.skipToNextDay();
@@ -487,6 +491,7 @@ class VHSTraderGame {
         this.day++;
 
         this.btnStartDay.style.display = 'inline-block';
+        this.btnNewGame.style.display = 'inline-block';
         this.btnStartDay.textContent = '🌅 Продолжить';
         this.customerAvatarEl.textContent = '☀️';
         this.customerRequestEl.textContent = `День ${this.day}. Нажмите "Продолжить" чтобы открыть магазин.`;
